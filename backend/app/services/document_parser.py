@@ -2,52 +2,55 @@
 Document parser using unstructured library for PDF processing.
 Extracts text, tables, and images with proper metadata.
 """
-import os
-from typing import List, Dict, Any
+from typing import Dict, Any
 from pathlib import Path
 from unstructured.partition.pdf import partition_pdf
-from unstructured.documents.elements import Element, Image, Table
+from unstructured.documents.elements import Image, Table
 import uuid
 
 
 class DocumentParser:
-    def __init__(self, output_dir: str = "outputs/images"):
+    def __init__(self, output_dir: str | Path = "outputs/images"):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
     def parse_pdf(self, pdf_path: str, document_id: str) -> Dict[str, Any]:
         """
         Parse PDF using unstructured with hi_res strategy.
-        Returns structured document with text, tables, and images.
+        Returns unified chunks list.
         """
-        # Partition PDF with hi_res strategy for better accuracy
         elements = partition_pdf(
             filename=pdf_path,
-            strategy="hi_res",               
-            infer_table_structure=True,      
-            extract_images_in_pdf=True,       
-            languages=["eng"],                
+            strategy="hi_res",
+            infer_table_structure=True,
+            extract_images_in_pdf=True,
+            languages=["eng"],
             chunking_strategy="by_title",
             max_characters=1200,
             new_after_n_chars=1000,
         )
 
-        # Process elements
         chunks = []
         image_paths = []
         chunk_index = 0
 
         for element in elements:
-            metadata = element.metadata.to_dict() if hasattr(element.metadata, 'to_dict') else {}
-            page_number = metadata.get('page_number', 1)
+            metadata = (
+                element.metadata.to_dict()
+                if hasattr(element.metadata, "to_dict")
+                else {}
+            )
 
+            page_number = metadata.get("page_number", 1)
+
+            # ---------------- IMAGE ----------------
             if isinstance(element, Image):
-                # Extract and save image
-                image_path = self._extract_image(element, document_id, chunk_index)
+                image_path = self._extract_image(
+                    element, document_id, chunk_index
+                )
+
                 if image_path:
                     image_paths.append(image_path)
-                    
-                    # Create chunk for image with description
                     chunks.append({
                         "chunk_id": f"{document_id}_chunk_{chunk_index}",
                         "document_id": document_id,
@@ -55,35 +58,35 @@ class DocumentParser:
                         "content_type": "image",
                         "page_number": page_number,
                         "image_path": image_path,
-                        "metadata": metadata
+                        "metadata": metadata,
                     })
                     chunk_index += 1
 
+            # ---------------- TABLE ----------------
             elif isinstance(element, Table):
-                # Extract table as text only (no HTML)
-                table_text = element.text or element.metadata.text_as_html or ""
-                
-                chunks.append({
-                    "chunk_id": f"{document_id}_chunk_{chunk_index}",
-                    "document_id": document_id,
-                    "content": table_text,
-                    "content_type": "table",
-                    "page_number": page_number,
-                    "metadata": metadata
-                })
-                chunk_index += 1
-
-            else:
-                # Regular text element
-                text_content = element.text
-                if text_content and len(text_content.strip()) > 0:
+                table_text = element.text or ""
+                if table_text.strip():
                     chunks.append({
                         "chunk_id": f"{document_id}_chunk_{chunk_index}",
                         "document_id": document_id,
-                        "content": text_content,
+                        "content": table_text,
+                        "content_type": "table",
+                        "page_number": page_number,
+                        "metadata": metadata,
+                    })
+                    chunk_index += 1
+
+            # ---------------- TEXT ----------------
+            else:
+                text = element.text
+                if text and text.strip():
+                    chunks.append({
+                        "chunk_id": f"{document_id}_chunk_{chunk_index}",
+                        "document_id": document_id,
+                        "content": text,
                         "content_type": "text",
                         "page_number": page_number,
-                        "metadata": metadata
+                        "metadata": metadata,
                     })
                     chunk_index += 1
 
@@ -91,28 +94,22 @@ class DocumentParser:
             "document_id": document_id,
             "chunks": chunks,
             "image_paths": image_paths,
-            "total_chunks": len(chunks)
+            "total_chunks": len(chunks),
         }
 
-    def _extract_image(self, element: Image, document_id: str, index: int) -> str:
-        """
-        Extract and save image from element.
-        Returns the saved image path.
-        """
+    def _extract_image(self, element: Image, document_id: str, index: int):
         try:
-            # Generate unique filename
-            image_filename = f"{document_id}_image_{index}_{uuid.uuid4().hex[:8]}.png"
-            image_path = self.output_dir / image_filename
+            if not hasattr(element, "image") or element.image is None:
+                return None
 
-            # Get image data from element
-            if hasattr(element, 'image'):
-                # Save image
-                with open(image_path, 'wb') as f:
-                    f.write(element.image)
-                return str(image_path)
-            
-            return None
+            filename = f"{document_id}_img_{index}_{uuid.uuid4().hex[:6]}.png"
+            path = self.output_dir / filename
+
+            with open(path, "wb") as f:
+                f.write(element.image)
+
+            return str(path)
 
         except Exception as e:
-            print(f"Error extracting image: {e}")
+            print("Image extraction failed:", e)
             return None
