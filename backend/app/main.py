@@ -27,6 +27,10 @@ from app.models.schemas import (
     HealthResponse,
 )
 
+from dotenv import load_dotenv
+load_dotenv()
+
+
 # Global service instances
 parser: DocumentParser | None = None
 embedding_service: EmbeddingService | None = None
