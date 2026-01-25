@@ -23,7 +23,7 @@ class DocumentParser:
         # Partition PDF with hi_res strategy for better accuracy
         elements = partition_pdf(
             filename=pdf_path,
-            strategy="hi_res",
+            strategy="fast",
             extract_images_in_pdf=True,
             extract_image_block_types=["Image", "Table"],
             extract_image_block_to_payload=False,
