@@ -155,12 +155,14 @@ async def upload_document(file: UploadFile = File(...)):
         return UploadResponse(
             document_id=document_id,
             filename=file.filename,
-            text_chunks=len([c for c in chunks if c["content_type"] == "text"]),
-            tables=len([c for c in chunks if c["content_type"] == "table"]),
-            images=len([c for c in chunks if c["content_type"] == "image"]),
+            total_chunks=len(parsed.get("chunks", [])),   # ✅ FIX
+            text_chunks=len([c for c in parsed.get("chunks", []) if c["content_type"] == "text"]),
+            tables=len([c for c in parsed.get("chunks", []) if c["content_type"] == "table"]),
+            images=len([c for c in parsed.get("chunks", []) if c["content_type"] == "image"]),
             processing_time_ms=int((time.time() - start) * 1000),
             message="Document processed successfully",
-        )
+            )
+
 
     finally:
         temp_path.unlink(missing_ok=True)
