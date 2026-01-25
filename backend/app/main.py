@@ -128,37 +128,50 @@ async def upload_document(file: UploadFile = File(...)):
 
     document_id = f"doc_{uuid.uuid4().hex[:12]}"
 
-    pdf_bytes = await file.read()
+    temp_dir = Path("temp")
+    temp_dir.mkdir(exist_ok=True)
 
-    parsed = await parser.parse_pdf(
-        pdf_bytes=pdf_bytes,
-        filename=file.filename,
-    )
+    temp_path = temp_dir / f"{document_id}.pdf"
 
-    chunks = (
-        parsed["text_chunks"]
-        + parsed["tables"]
-        + parsed["images"]
-    )
+    with open(temp_path, "wb") as f:
+        f.write(await file.read())
 
-    if not chunks:
-        raise HTTPException(status_code=400, detail="No content extracted")
+    try:
 
-    texts = [c["content"] for c in chunks]
+        parsed = parser.parse_pdf(
+            file_path=str(temp_path),
+            document_id=document_id,
+        )
 
-    embeddings = await embedding_service.embed_documents(texts)
+        chunks = (
+            parsed["text_chunks"]
+            + parsed["tables"]
+            + parsed["images"]
+        )
 
-    vector_store.add_documents(chunks, embeddings)
+        if not chunks:
+            raise HTTPException(status_code=400, detail="No content extracted")
 
-    return UploadResponse(
-        document_id=document_id,
-        filename=file.filename,
-        text_chunks=len(parsed["text_chunks"]),
-        tables=len(parsed["tables"]),
-        images=len(parsed["images"]),
-        processing_time_ms=int((time.time() - start) * 1000),
-        message="Document processed successfully",
-    )
+        texts = [c["content"] for c in chunks]
+
+        embeddings = await embedding_service.embed_documents(texts)
+
+        vector_store.add_documents(chunks, embeddings)
+
+        return UploadResponse(
+            document_id=document_id,
+            filename=file.filename,
+            text_chunks=len(parsed["text_chunks"]),
+            tables=len(parsed["tables"]),
+            images=len(parsed["images"]),
+            processing_time_ms=int((time.time() - start) * 1000),
+            message="Document processed successfully",
+        )
+
+    finally:
+
+        temp_path.unlink(missing_ok=True)
+
 
 
 @app.post("/query", response_model=QueryResponse)
