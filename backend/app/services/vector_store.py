@@ -13,6 +13,7 @@ from qdrant_client.models import (
 )
 from typing import List, Dict, Any, Optional
 import numpy as np
+import uuid
 
 
 class VectorStore:
@@ -29,14 +30,12 @@ class VectorStore:
         """
         Create or recreate the collection.
         """
-        # Check if collection exists
         collections = self.client.get_collections().collections
         collection_exists = any(c.name == self.collection_name for c in collections)
-        
+
         if collection_exists:
             self.client.delete_collection(self.collection_name)
-        
-        # Create collection
+
         self.client.create_collection(
             collection_name=self.collection_name,
             vectors_config=VectorParams(
@@ -52,49 +51,43 @@ class VectorStore:
     ):
         """
         Add document chunks with embeddings to Qdrant.
-        Uses chunk_id to prevent ID collisions.
+        Uses UUIDs as point IDs (Qdrant requirement).
         """
         if len(chunks) != len(embeddings):
             raise ValueError(
                 f"Mismatch: {len(chunks)} chunks but {len(embeddings)} embeddings"
             )
-        
+
         points = []
-        
+
         for chunk, embedding in zip(chunks, embeddings):
-            # Validate content_type
             content_type = chunk.get("content_type", "text")
             if content_type not in ["text", "table", "image"]:
-                print(f"Warning: Invalid content_type '{content_type}', defaulting to 'text'")
                 content_type = "text"
-            
-            # Validate embedding dimension
+
             if embedding.shape[0] == 0 or np.all(embedding == 0):
-                print(f"Warning: Zero embedding for chunk {chunk['chunk_id']}, skipping")
                 continue
-            
-            # Build payload (NO table_html)
+
             payload = {
+                "chunk_id": chunk["chunk_id"],        # ← keep here
                 "document_id": chunk["document_id"],
                 "content": chunk["content"],
                 "content_type": content_type,
                 "page_number": chunk.get("page_number", 1),
                 "metadata": chunk.get("metadata", {})
             }
-            
-            # Add image_path only if it exists
-            if "image_path" in chunk and chunk["image_path"]:
+
+            if chunk.get("image_path"):
                 payload["image_path"] = chunk["image_path"]
-            
-            # Use chunk_id as point ID to prevent collisions
+
             point = PointStruct(
-                id=chunk["chunk_id"],
+                id=str(uuid.uuid4()),                 # ✅ FIX
                 vector=embedding.tolist(),
                 payload=payload
             )
+
             points.append(point)
-        
-        # Upload to Qdrant
+
         if points:
             self.client.upsert(
                 collection_name=self.collection_name,
@@ -109,14 +102,10 @@ class VectorStore:
     ) -> List[Dict[str, Any]]:
         """
         Search for similar chunks.
-        Supports optional document-level filtering.
         """
-        # Validate embedding dimension
         if query_embedding.shape[0] == 0 or np.all(query_embedding == 0):
-            print("Warning: Zero query embedding, returning empty results")
             return []
-        
-        # Build filter for document_id if provided
+
         query_filter = None
         if document_id:
             query_filter = Filter(
@@ -127,16 +116,15 @@ class VectorStore:
                     )
                 ]
             )
-        
-        # Search
+
         results = self.client.search(
             collection_name=self.collection_name,
             query_vector=query_embedding.tolist(),
             limit=limit,
-            query_filter=query_filter
+            query_filter=query_filter,
+            with_payload=True
         )
-        
-        # Format results
+
         formatted_results = []
         for result in results:
             formatted_results.append({
@@ -147,9 +135,10 @@ class VectorStore:
                 "page_number": result.payload.get("page_number", 1),
                 "image_path": result.payload.get("image_path"),
                 "document_id": result.payload.get("document_id"),
+                "chunk_id": result.payload.get("chunk_id"),
                 "metadata": result.payload.get("metadata", {})
             })
-        
+
         return formatted_results
 
     def delete_document(self, document_id: str):
@@ -172,13 +161,10 @@ class VectorStore:
         """
         Get collection information.
         """
-        try:
-            info = self.client.get_collection(self.collection_name)
-            return {
-                "name": self.collection_name,
-                "vectors_count": info.vectors_count,
-                "points_count": info.points_count,
-                "status": info.status
-            }
-        except Exception as e:
-            return {"error": str(e)}
+        info = self.client.get_collection(self.collection_name)
+        return {
+            "name": self.collection_name,
+            "vectors_count": info.vectors_count,
+            "points_count": info.points_count,
+            "status": info.status
+        }
