@@ -161,7 +161,7 @@ async def upload_document(file: UploadFile = File(...)):
             images=len([c for c in parsed.get("chunks", []) if c["content_type"] == "image"]),
             processing_time_ms=int((time.time() - start) * 1000),
             message="Document processed successfully",
-            )
+        )
 
 
     finally:

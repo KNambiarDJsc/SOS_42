@@ -2,7 +2,7 @@
 RAG service with explicit agentic behavior.
 Handles retrieval and delegates analysis to Document Analysis Agent.
 """
-from typing import List, Dict, Any, Optional
+from typing import Dict, Any, Optional
 import os
 from app.agents import DocumentAnalysisAgent
 
@@ -58,8 +58,8 @@ class RAGService:
                 "confidence": "low"
             }
 
-        # 3️⃣ Agent reasoning (probabilistic)
-        agent_result = await self.agent.analyze(
+        # 3️⃣ Agent reasoning (SYNC — DO NOT AWAIT)
+        agent_result = self.agent.analyze(
             query=query,
             retrieved_evidence=retrieved_evidence
         )
