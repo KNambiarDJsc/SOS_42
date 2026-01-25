@@ -9,16 +9,15 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 import os
 import uuid
-import tempfile
 import time
 
+from dotenv import load_dotenv
+load_dotenv()
 
 from app.services.document_parser import DocumentParser
 from app.services.embeddings import EmbeddingService
 from app.services.vector_store import VectorStore
 from app.services.rag_service import RAGService
-
-
 from app.models.schemas import (
     UploadResponse,
     QueryRequest,
@@ -27,25 +26,25 @@ from app.models.schemas import (
     HealthResponse,
 )
 
-from dotenv import load_dotenv
-load_dotenv()
-
-
-# Global service instances
+# --------------------------------------------------
+# Globals
+# --------------------------------------------------
 parser: DocumentParser | None = None
 embedding_service: EmbeddingService | None = None
 vector_store: VectorStore | None = None
 rag_service: RAGService | None = None
 
 
-
+# --------------------------------------------------
+# Lifespan
+# --------------------------------------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global parser, embedding_service, vector_store, rag_service
 
     print("🚀 Initializing services...")
 
-    parser = DocumentParser(output_dir=Path("outputs/images"))
+    parser = DocumentParser(output_dir="outputs/images")
 
     embedding_service = EmbeddingService()
 
@@ -71,7 +70,9 @@ async def lifespan(app: FastAPI):
     print("👋 Shutting down services...")
 
 
-
+# --------------------------------------------------
+# App
+# --------------------------------------------------
 app = FastAPI(
     title="Multimodal Agentic RAG API",
     description="Production-grade multimodal agentic RAG system",
@@ -91,34 +92,32 @@ Path("outputs/images").mkdir(parents=True, exist_ok=True)
 app.mount("/outputs", StaticFiles(directory="outputs"), name="outputs")
 
 
-
-
+# --------------------------------------------------
+# Routes
+# --------------------------------------------------
 @app.get("/")
 async def root():
-    return {
-        "message": "Multimodal Agentic RAG API",
-        "docs": "/docs",
-    }
+    return {"message": "Multimodal Agentic RAG API", "docs": "/docs"}
 
 
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
-    try:
-        info = vector_store.get_collection_info()
-        return HealthResponse(
-            status="healthy",
-            collection_info=info,
-            services={
-                "parser": True,
-                "embeddings": True,
-                "vector_store": True,
-                "rag": True,
-            },
-        )
-    except Exception as e:
-        raise HTTPException(status_code=503, detail=str(e))
+    info = vector_store.get_collection_info()
+    return HealthResponse(
+        status="healthy",
+        collection_info=info,
+        services={
+            "parser": True,
+            "embeddings": True,
+            "vector_store": True,
+            "rag": True,
+        },
+    )
 
 
+# --------------------------------------------------
+# UPLOAD (FIXED)
+# --------------------------------------------------
 @app.post("/upload", response_model=UploadResponse)
 async def upload_document(file: UploadFile = File(...)):
     start = time.time()
@@ -128,53 +127,37 @@ async def upload_document(file: UploadFile = File(...)):
 
     document_id = f"doc_{uuid.uuid4().hex[:12]}"
 
-    # -----------------------------
-    # 1. Save PDF to disk
-    # -----------------------------
     temp_dir = Path("temp")
     temp_dir.mkdir(exist_ok=True)
-
     temp_path = temp_dir / f"{document_id}.pdf"
 
     with open(temp_path, "wb") as f:
         f.write(await file.read())
 
     try:
-        # -----------------------------
-        # 2. CALL PARSER POSITIONALLY
-        # -----------------------------
-        parsed = parser.parse_pdf(
-            str(temp_path),      # <-- positional
-            document_id          # <-- positional
-        )
+        parsed = parser.parse_pdf(str(temp_path), document_id)
 
-        chunks = (
-            parsed.get("text_chunks", [])
-            + parsed.get("tables", [])
-            + parsed.get("images", [])
-        )
+        # ✅ CORRECT KEY
+        chunks = parsed.get("chunks", [])
 
         if not chunks:
-            raise HTTPException(status_code=400, detail="No content extracted")
+            raise HTTPException(
+                status_code=400,
+                detail="No content extracted from PDF",
+            )
 
-        texts = [c["content"] for c in chunks]
+        texts = [c["content"] for c in chunks if c.get("content")]
 
-        # -----------------------------
-        # 3. Async OpenAI embeddings
-        # -----------------------------
         embeddings = await embedding_service.embed_documents(texts)
 
-        # -----------------------------
-        # 4. Store in Qdrant
-        # -----------------------------
         vector_store.add_documents(chunks, embeddings)
 
         return UploadResponse(
             document_id=document_id,
             filename=file.filename,
-            text_chunks=len(parsed.get("text_chunks", [])),
-            tables=len(parsed.get("tables", [])),
-            images=len(parsed.get("images", [])),
+            text_chunks=len([c for c in chunks if c["content_type"] == "text"]),
+            tables=len([c for c in chunks if c["content_type"] == "table"]),
+            images=len([c for c in chunks if c["content_type"] == "image"]),
             processing_time_ms=int((time.time() - start) * 1000),
             message="Document processed successfully",
         )
@@ -183,8 +166,9 @@ async def upload_document(file: UploadFile = File(...)):
         temp_path.unlink(missing_ok=True)
 
 
-
-
+# --------------------------------------------------
+# QUERY
+# --------------------------------------------------
 @app.post("/query", response_model=QueryResponse)
 async def query_document(request: QueryRequest):
     result = await rag_service.query(
