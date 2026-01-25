@@ -52,7 +52,7 @@ async def lifespan(app: FastAPI):
     )
 
     vector_store.create_collection(
-        vector_size=embedding_service.EMBEDDING_DIM
+        vector_size=embedding_service.embedding_dim
     )
 
     rag_service = RAGService(
