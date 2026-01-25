@@ -18,51 +18,52 @@ class RAGService:
         self.vector_store = vector_store
         self.embedding_service = embedding_service
         self.model = model
-        
-        # Initialize Document Analysis Agent
+
         self.agent = DocumentAnalysisAgent(
             model=model,
             api_key=api_key or os.getenv("OPENAI_API_KEY")
         )
 
-    def query(
-        self, 
-        query: str, 
+    async def query(
+        self,
+        query: str,
         document_id: str,
         top_k: int = 5
     ) -> Dict[str, Any]:
         """
-        Process query with explicit agentic RAG.
-        
-        Flow:
+        Explicit agentic RAG pipeline.
+
         1. Deterministic retrieval (vector search)
-        2. Agent analyzes evidence and makes decisions
-        3. Agent generates grounded answer
+        2. Evidence passed to analysis agent
+        3. Agent produces grounded answer
         """
-        # Embed query (deterministic)
-        query_embedding = self.embedding_service.embed_query(query)
-        
-        # Retrieve relevant chunks (deterministic, document-scoped)
+
+        # 1️⃣ Embed query (deterministic)
+        query_embedding = await self.embedding_service.embed_query(query)
+
+        # 2️⃣ Retrieve evidence (deterministic)
         retrieved_evidence = self.vector_store.search(
             query_embedding=query_embedding,
             limit=top_k,
             document_id=document_id
         )
-        
+
         if not retrieved_evidence:
             return {
                 "answer": "No relevant information found in the document.",
                 "citations": [],
                 "images": [],
-                "agent_reasoning": "No evidence retrieved from vector store"
+                "agent_reasoning": "Vector search returned no evidence",
+                "evidence_sufficient": False,
+                "confidence": "low"
             }
-        
-        # Agent analyzes evidence and generates response (probabilistic)
-        agent_result = self.agent.analyze(
+
+        # 3️⃣ Agent reasoning (probabilistic)
+        agent_result = await self.agent.analyze(
             query=query,
             retrieved_evidence=retrieved_evidence
         )
-        
+
         return {
             "answer": agent_result["final_answer"],
             "citations": agent_result["citations"],
