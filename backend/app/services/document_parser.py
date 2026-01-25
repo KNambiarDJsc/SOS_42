@@ -23,10 +23,13 @@ class DocumentParser:
         # Partition PDF with hi_res strategy for better accuracy
         elements = partition_pdf(
             filename=pdf_path,
-            strategy="fast",
-            extract_images_in_pdf=True,
-            extract_image_block_types=["Image", "Table"],
-            extract_image_block_to_payload=False,
+            strategy="hi_res",               
+            infer_table_structure=True,      
+            extract_images_in_pdf=True,       
+            languages=["eng"],                
+            chunking_strategy="by_title",
+            max_characters=1200,
+            new_after_n_chars=1000,
         )
 
         # Process elements

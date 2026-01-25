@@ -128,6 +128,9 @@ async def upload_document(file: UploadFile = File(...)):
 
     document_id = f"doc_{uuid.uuid4().hex[:12]}"
 
+    # -----------------------------
+    # 1. Save PDF to disk
+    # -----------------------------
     temp_dir = Path("temp")
     temp_dir.mkdir(exist_ok=True)
 
@@ -137,16 +140,18 @@ async def upload_document(file: UploadFile = File(...)):
         f.write(await file.read())
 
     try:
-
+        # -----------------------------
+        # 2. CALL PARSER POSITIONALLY
+        # -----------------------------
         parsed = parser.parse_pdf(
-            file_path=str(temp_path),
-            document_id=document_id,
+            str(temp_path),      # <-- positional
+            document_id          # <-- positional
         )
 
         chunks = (
-            parsed["text_chunks"]
-            + parsed["tables"]
-            + parsed["images"]
+            parsed.get("text_chunks", [])
+            + parsed.get("tables", [])
+            + parsed.get("images", [])
         )
 
         if not chunks:
@@ -154,23 +159,29 @@ async def upload_document(file: UploadFile = File(...)):
 
         texts = [c["content"] for c in chunks]
 
+        # -----------------------------
+        # 3. Async OpenAI embeddings
+        # -----------------------------
         embeddings = await embedding_service.embed_documents(texts)
 
+        # -----------------------------
+        # 4. Store in Qdrant
+        # -----------------------------
         vector_store.add_documents(chunks, embeddings)
 
         return UploadResponse(
             document_id=document_id,
             filename=file.filename,
-            text_chunks=len(parsed["text_chunks"]),
-            tables=len(parsed["tables"]),
-            images=len(parsed["images"]),
+            text_chunks=len(parsed.get("text_chunks", [])),
+            tables=len(parsed.get("tables", [])),
+            images=len(parsed.get("images", [])),
             processing_time_ms=int((time.time() - start) * 1000),
             message="Document processed successfully",
         )
 
     finally:
-
         temp_path.unlink(missing_ok=True)
+
 
 
 
